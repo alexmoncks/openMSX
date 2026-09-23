@@ -258,11 +258,11 @@ public:
 	}
 
 	[[nodiscard]] bool hasECOM() const {
-		return (version & VM_V9968_OLD) != 0;
+		return (version & VM_V9968) != 0;
 	}
 
 	[[nodiscard]] bool hasEVR() const {
-		return (version & VM_V9968_OLD) != 0;
+		return (version & VM_V9968) != 0;
 	}
 
 	[[nodiscard]] bool hasS16() const {
@@ -282,7 +282,7 @@ public:
 	}
 
 	[[nodiscard]] bool hasFID() const {
-		return (version & VM_V9968_OLD) != 0;
+		return (version & VM_V9968) != 0;
 	}
 
 	[[nodiscard]] bool hasV58() const {

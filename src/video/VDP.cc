@@ -204,12 +204,12 @@ VDP::VDP(const DeviceConfig& config)
 		controlValueMasks[16] |= 0xFF;
 		controlValueMasks[20] |= 0x10;
 	}
-	if (hasECOM()) {
+	if (hasECOM() && isV9968_Old()) {
 		controlValueMasks[20] |= 0x20;
 	}
 	if (hasEVR()) {
 		updateAddressMask(false);
-		controlValueMasks[20] |= 0x40;
+		if (isV9968_Old()) controlValueMasks[20] |= 0x40;
 	}
 	if (hasS16()) {
 		controlValueMasks[20] |= 0x80;
@@ -433,6 +433,12 @@ void VDP::reset(EmuTime time)
 	spriteChecker->reset(time);
 	cmdEngine->reset(time);
 	renderer->reInit();
+
+	if (hasV58()) {
+		// R#21 is back to V9958 mode: leave the 256kB VRAM mode too.
+		updateAddressMask(isEVR());
+		vram->updateEVRMode(isEVR(), time);
+	}
 
 	// Tell the subsystems of the new mask values.
 	resetMasks(time);
@@ -1327,7 +1333,7 @@ void VDP::changeRegister(uint8_t reg, uint8_t val, EmuTime time)
 			|| (hasSVNS() && (change & 0x02))) {
 			syncAtNextLine(syncSetMode, time);
 		}
-		if (hasEVR() && (change & 0x40)) {
+		if (hasEVR() && isV9968_Old() && (change & 0x40)) {
 			updateAddressMask((val & 0x40) != 0);
 			vram->updateEVRMode((val & 0x40) != 0, time);
 		}
@@ -1339,6 +1345,12 @@ void VDP::changeRegister(uint8_t reg, uint8_t val, EmuTime time)
 		if (hasFID() && (change & 0x01)) {
 			statusReg1 &= ~(0x1F << 1);
 			statusReg1 |= (val & 0x01) ? (0x02 << 1) : (0x03 << 1);
+		}
+		if (hasV58() && (change & 0x01)) {
+			// V9968 (new register layout): bit 0 = 0 also selects the
+			// 256kB VRAM mode, as in the FPGA (reg_vram256k_mode).
+			updateAddressMask((val & 0x01) == 0);
+			vram->updateEVRMode((val & 0x01) == 0, time);
 		}
 		break;
 	case 23:
