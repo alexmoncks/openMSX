@@ -765,6 +765,8 @@
     <ClCompile Include="$(OpenMSXSrcDir)\video\SDLRasterizer.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\SDLVideoSystem.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\SpriteChecker.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\video\Geo3D.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\video\Geo3DCore.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\VDP.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\VDPCmdEngine.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\VDPAccessSlots.cc" />
@@ -1417,6 +1419,8 @@
     <None Include="$(OpenMSXSrcDir)\video\SDLVideoSystem.hh" />
     <None Include="$(OpenMSXSrcDir)\video\SpriteChecker.hh" />
     <None Include="$(OpenMSXSrcDir)\video\SpriteConverter.hh" />
+    <None Include="$(OpenMSXSrcDir)\video\Geo3D.hh" />
+    <None Include="$(OpenMSXSrcDir)\video\Geo3DCore.hh" />
     <None Include="$(OpenMSXSrcDir)\video\VDP.hh" />
     <None Include="$(OpenMSXSrcDir)\video\VDPCmdEngine.hh" />
     <None Include="$(OpenMSXSrcDir)\video\VDPAccessSlots.hh" />

@@ -89,6 +89,7 @@
 #include "VDP.hh"
 #include "VDPIODelay.hh"
 #include "VictorFDC.hh"
+#include "Geo3D.hh"
 #include "Video9000.hh"
 #include "XMLElement.hh"
 #include "YamahaFDC.hh"
@@ -287,6 +288,8 @@ std::unique_ptr<MSXDevice> DeviceFactory::create(DeviceConfig& conf)
 		result = std::make_unique<DebugDevice>(conf);
 	} else if (type == "V9990") {
 		result = std::make_unique<V9990>(conf);
+	} else if (type == "Geo3D") {
+		result = std::make_unique<Geo3D>(conf);
 	} else if (type == "Video9000") {
 		result = std::make_unique<Video9000>(conf);
 	} else if (type == "ADVram") {

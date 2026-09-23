@@ -461,6 +461,8 @@ sources = files(
     'video/SDLVideoSystem.cc',
     'video/SpriteChecker.cc',
     'video/SuperImposedFrame.cc',
+    'video/Geo3D.cc',
+    'video/Geo3DCore.cc',
     'video/VDP.cc',
     'video/VDPAccessSlots.cc',
     'video/VDPCmdEngine.cc',
