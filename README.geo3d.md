@@ -17,7 +17,7 @@ with a page of the demos in English, Portuguese and Spanish:
 |---|---|
 | `src/video/Geo3DCore.hh/.cc` | geo3d itself: register window, vertex/edge/face/texture RAMs, transform, clipping, back-face culling, lighting, painter's sort, LINE and LRMM command lists. A 1:1 port of the Python reference model the RTL matches bit for bit, with no openMSX dependency. |
 | `src/video/Geo3D.hh/.cc` | the openMSX device (`Geo3D`): two I/O ports, feeds the commands to the VDP |
-| `share/extensions/geo3d.xml` | the extension: `-ext geo3d` |
+| `share/extensions/geo3d.xml`, `geo3d88.xml` | the extensions: `-ext geo3d` (98h profile), `-ext geo3d88` (88h cartridge profile) |
 | `src/video/VDP.hh/.cc` | a fix for the V9968 (see below) |
 | `tools/geo3d_replay.cc` | runs a geo3d stimulus file through `Geo3DCore` and writes the command log, to diff against the reference model |
 | `tools/geo3d_smoke.tcl` | a quick check of the device in a running machine |
@@ -40,11 +40,14 @@ its wave ROM) or `-ext OPL3Cartridge_Moonsound_compatible`.
 
 ## The device
 
-- Ports (extension defaults): **9Dh** index write / status read, **9Fh** data,
-  next to the V9968 on 98h-9Ch. The register map is the one in the header of
-  `geo3d/rtl/geo3d_engine.v`. On the real cartridge geo3d sits at 8Dh/8Fh next
-  to the cartridge VDP at 88h; that profile is not emulated (the fork's V9968 is
-  the machine's VDP).
+- Ports: **9Dh** index write / status read, **9Fh** data, next to a V9968 on
+  98h-9Ch (`-ext geo3d`). The register map is the one in the header of
+  `geo3d/rtl/geo3d_engine.v`.
+- Cartridge profile: `-ext HRA_V9968 -ext geo3d88` puts geo3d at **8Dh/8Fh**,
+  next to the fork's V9968 cartridge at 88h-8Ch, on any machine (the order
+  matters: geo3d88 looks up the VDP named `V9968`). Checked on an MSX1 and an
+  MSX2+: geo3d answers and the V9968 reports ID 3 once R#21 bit 0 = 0. The
+  picture of that second VDP has not been checked yet.
 - `<vdp>` names the VDP device the commands go to (default `VDP`).
 - Writing RUN computes the whole command list of the frame at once. The device
   then writes each command into the VDP command registers through
@@ -87,7 +90,7 @@ reports `VDP ID=3 / V9968 IDENTIFIED` on the `C-BIOS_V9968_JP` machine.
 - geo3d here is not cycle exact: the geometry takes no emulated time, and each
   command is issued as soon as the VDP is idle. The fork's VDP timing is itself
   approximate (see `src/video/ToDo.txt`).
-- Only the emulator profile (98h / 9Dh / 9Fh) is supported.
+- The demo ROM for real hardware (88h) has not been run on the cartridge profile yet.
 
 ## Building for Windows
 
