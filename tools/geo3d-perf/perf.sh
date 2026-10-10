@@ -6,6 +6,7 @@
 # core), no video, no throttle. The binaries are interleaved over ROUNDS runs
 # (default 5) and the minimum, median and maximum are printed: on a busy host
 # single runs differ by 10 %, so compare the minimums.
+# OPENMSX_SET="approx_cmd_timing on" measures the approximate command timing.
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 ROUNDS=${ROUNDS:-5}
 res=$(mktemp)
@@ -14,7 +15,7 @@ one() { # binary label seconds rom
 	local bin=$1 label=$2 end=$3 rom=$4
 	[ -f "$rom" ] || return
 	headless BENCH_RENDERER=none BENCH_END=$end BENCH_WIN=$((end - 20)) \
-		taskset -c "$BENCH_CPU" "$bin" "${M98[@]}" -cart "$rom" -romtype ASCII16 -script "$TOOLS/bench.tcl" 2>&1 \
+		taskset -c "$BENCH_CPU" "$bin" "${M98[@]}" -cart "$rom" -romtype ASCII16 -setting "$(fresh_settings)" -script "$TOOLS/bench.tcl" 2>&1 \
 		| grep -a BENCH | awk -v l="$label" -v b="$(basename "$bin")" '{ v=$7; gsub("%","",v); print b, l, v }' >> "$res"
 }
 

@@ -13,6 +13,8 @@ proc benv {name def} {
 	if {[info exists ::env($name)]} { return $::env($name) }
 	return $def
 }
+# OPENMSX_SET="name value ..." sets openMSX settings first, e.g. "approx_cmd_timing on"
+if {[info exists ::env(OPENMSX_SET)]} { foreach {k v} $::env(OPENMSX_SET) { set ::$k $v } }
 set ::bench_end [benv BENCH_END 240]
 set ::bench_win [benv BENCH_WIN 10]
 set throttle [benv BENCH_THROTTLE off]

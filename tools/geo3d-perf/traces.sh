@@ -49,7 +49,7 @@ run() { # name seconds [VAR=value...] -- openmsx arguments
 	done
 	for mode in ${MODES:-state probe}; do
 		headless TRACE_OUT="$OUT/$name.$mode.txt" TRACE_MODE=$mode TRACE_END=$end "${envs[@]}" \
-			"$OPENMSX_BIN" "$@" -script "$TOOLS/trace.tcl" > "$OUT/$name.$mode.log" 2>&1 &
+			"$OPENMSX_BIN" "$@" -setting "$(fresh_settings)" -script "$TOOLS/trace.tcl" > "$OUT/$name.$mode.log" 2>&1 &
 	done
 }
 

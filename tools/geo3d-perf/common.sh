@@ -21,3 +21,14 @@ headless() {
 }
 
 M98=(-machine C-BIOS_V9968_JP -ext geo3d)
+
+# openMSX saves the settings when it exits: give every run a private copy of
+# the user's settings.xml, or a setting made by a test would end up in it.
+SETTINGS_DIR=$(mktemp -d)
+trap 'rm -rf "$SETTINGS_DIR"' EXIT
+fresh_settings() {
+	local f
+	f=$(mktemp -p "$SETTINGS_DIR" settings.XXXXXX)
+	cp "$HOME/.openMSX/share/settings.xml" "$f" 2>/dev/null || rm -f "$f"
+	echo "$f"
+}
