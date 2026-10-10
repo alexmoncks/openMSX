@@ -364,6 +364,30 @@ private:
 	template<typename Mode, typename LogOp> void executeLfmmHs(EmuTime limit);
 	template<typename Mode, typename LogOp> void executeLrmmHs(EmuTime limit);
 
+	// Approximate timing (see cmdApproxTimingSetting): the whole command is
+	// drawn when it starts, by these loops without any timing, and CE stays
+	// set for an estimated duration. They return the number of bytes
+	// (HMMV, HMMM) or pixels (LINE, LRMM) processed.
+	struct ApproxCost {
+		// indexed by 'planar addressing': [0] SCREEN 5/6, [1] SCREEN 7/8
+		uint16_t ticksPerUnit256[2]; // VDP ticks per byte or pixel, times 256
+		uint16_t overhead[2];        // VDP ticks per command
+	};
+	// Fitted on the exact model with the geo3d demo ROM, SPHERE7 and the
+	// shooter (2026-10-10), see tools/geo3d-perf/README.md.
+	static constexpr ApproxCost COST_HMMV = {{257,  321}, { 2,   2}};
+	static constexpr ApproxCost COST_HMMM = {{794, 1175}, {45, 200}};
+	static constexpr ApproxCost COST_LINE = {{474,  717}, { 8,   8}};
+	static constexpr ApproxCost COST_LRMM = {{576,  883}, {25,  21}};
+	template<typename Mode>                 unsigned approxHmmv(EmuTime time);
+	template<typename Mode>                 unsigned approxHmmm(EmuTime time);
+	template<typename Mode, typename LogOp> unsigned approxLine(EmuTime time);
+	template<typename Mode, typename LogOp> unsigned approxLrmm(EmuTime time);
+	void approxDrawn(unsigned units, const ApproxCost& cost);
+	void approxSync(EmuTime limit) {
+		if (limit >= approxEnd) commandDone(approxEnd);
+	}
+
 	// Advance to the next access slot at or past the given time.
 	EmuTime getNextAccessSlot(EmuTime time) const {
 		return vdp.getAccessSlot(time, VDPAccessSlots::Delta::D0);
@@ -495,8 +519,18 @@ private:
 	const bool hasExtendedVRAM;
 
 	BooleanSetting cmdForceHsSetting;
+
+	/** Fast commands with approximate timing: far less host CPU, same
+	  * picture, but the command duration is an estimate (a fitted cost per
+	  * pixel instead of the VRAM cache and access slot model) and the VRAM
+	  * changes all at once when the command starts.
+	  */
+	BooleanSetting cmdApproxTimingSetting;
+	bool approx{false};     // the running command uses approximate timing
+	bool approxDone{false}; // ... and has been drawn
+	EmuTime approxEnd{EmuTime::zero()}; // ... and CE drops at this time
 };
-SERIALIZE_CLASS_VERSION(VDPCmdEngine, 4);
+SERIALIZE_CLASS_VERSION(VDPCmdEngine, 5);
 
 } // namespace openmsx
 

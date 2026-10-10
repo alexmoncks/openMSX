@@ -40,6 +40,19 @@ The workloads cover the 98h profile (C-BIOS MSX2+ and a turboR), the 88h
 cartridge profile next to a V9938, and BASIC drawing commands on the V9968
 without the fast mode and on a plain V9938. A full run takes about 10 minutes.
 
+Two more modes compare runs whose timing differs on purpose (`MODES=frames`
+or `MODES=cmds`, with `OPENMSX_SET="approx_cmd_timing on"` for one of the two
+sets):
+
+- `frames`: one line per frame period, the CRC of the VRAM page on display.
+- `cmds`: after every 997th VDP command, the CRC of the whole VRAM, indexed
+  by command count. Slow: it follows every command through a Tcl callback.
+  Run its workloads one at a time (`ONLY=...`), several at once need a lot
+  of memory.
+
+Every run uses a private copy of `~/.openMSX/share/settings.xml`: openMSX
+saves the settings on exit, and a test setting must not end up in that file.
+
 ## Measurements of 2026-10-10 (commit de29fb854, one core of an i7-1280P)
 
 Host CPU per emulated second, no video: SPHERE7 6.8 %, the demo ROM 2.35 %.
@@ -48,6 +61,36 @@ Profile of SPHERE7: the V9968 side takes 77 % (VDPCmdEngine 51 %,
 VDPAccessSlots 13 %, Graphic6Mode 6 %, VDPVRAM 4 %, VDP 3.5 %), geo3d 9 %,
 the Z80 5 %, the scheduler 4 %. SPHERE7 issues about 67,000 VDP commands per
 emulated second.
+
+## Approximate command timing (prototype, setting `approx_cmd_timing`)
+
+With `set approx_cmd_timing on`, the fast (HS) HMMV, HMMM, LINE and LRMM
+commands are drawn in one go when they start, and CE stays set for an
+estimated time: a cost per byte or pixel plus a cost per command, fitted on
+the exact model (`ApproxCost` in `VDPCmdEngine.hh`). The other commands and
+the V9938-speed mode keep the exact path. Off by default.
+
+| | exact | approximate |
+|---|---|---|
+| SPHERE7, host CPU per emulated second | 6.77 % | 2.82 % |
+| demo ROM | 2.41 % | 0.88 % |
+
+Checked on 2026-10-10:
+
+- setting off: the 13 traces are identical to the fork without the patch;
+- setting on, command starts and ends in the same emulated time: demo ROM,
+  shooter and the 88h profile equal, SPHERE7 +0.025 %, demo ROM on the
+  turboR +0.013 %;
+- setting on, picture on display per frame: 99.6 % to 99.95 % of the
+  pictures also occur in the exact run, shifted by 0 to 3 frames (SPHERE7
+  runs 2 frames ahead after its start-up); the rest are at start-up and in
+  the shooter, where the page on display is being drawn.
+
+Not checked yet: the `cmds` comparison (same VRAM after the same commands),
+and the cost table for LINE in SCREEN 7/8, which is a guess. LMMM is not
+covered (the 1 MB game uses it).
+
+## Exact optimizations that did not pay
 
 Three changes that keep the traces identical were measured and gave no gain
 outside the run-to-run noise, so they were not kept:

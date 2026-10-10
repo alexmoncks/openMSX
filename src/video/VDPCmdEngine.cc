@@ -1163,6 +1163,11 @@ void VDPCmdEngine::startLineHs(EmuTime time)
 template<typename Mode, typename LogOp>
 void VDPCmdEngine::executeLineHs(EmuTime limit)
 {
+	if (approx) [[unlikely]] {
+		if (!approxDone) approxDrawn(approxLine<Mode, LogOp>(limit), COST_LINE);
+		approxSync(limit);
+		return;
+	}
 	// See doc/line-speed.txt for some background info on the timing.
 	uint8_t CL = COL & Mode::COLOR_MASK;
 	int TX = (ARG & DIX) ? -1 : 1;
@@ -2010,6 +2015,11 @@ void VDPCmdEngine::startHmmvHs(EmuTime time)
 template<typename Mode>
 void VDPCmdEngine::executeHmmvHs(EmuTime limit)
 {
+	if (approx) [[unlikely]] {
+		if (!approxDone) approxDrawn(approxHmmv<Mode>(limit), COST_HMMV);
+		approxSync(limit);
+		return;
+	}
 	NY &= getYBitMask(vdp.isEVR());
 	unsigned tmpNX = clipNX_1_byte<Mode>(DX, NX, ARG);
 	unsigned tmpNY = clipNY_1(DY, NY, ARG, vdp.hasEVR());
@@ -2199,6 +2209,11 @@ void VDPCmdEngine::startHmmmHs(EmuTime time)
 template<typename Mode>
 void VDPCmdEngine::executeHmmmHs(EmuTime limit)
 {
+	if (approx) [[unlikely]] {
+		if (!approxDone) approxDrawn(approxHmmm<Mode>(limit), COST_HMMM);
+		approxSync(limit);
+		return;
+	}
 	NY &= getYBitMask(vdp.isEVR());
 	unsigned tmpNX = clipNX_2_byte<Mode>(SX, DX, NX, ARG);
 	unsigned tmpNY = clipNY_2(SY, DY, NY, ARG, vdp.hasEVR());
@@ -2952,6 +2967,11 @@ void VDPCmdEngine::startLrmmHs(EmuTime time)
 template<typename Mode, typename LogOp>
 void VDPCmdEngine::executeLrmmHs(EmuTime limit)
 {
+	if (approx) [[unlikely]] {
+		if (!approxDone) approxDrawn(approxLrmm<Mode, LogOp>(limit), COST_LRMM);
+		approxSync(limit);
+		return;
+	}
 	NY &= getYBitMask(vdp.isEVR());
 	unsigned tmpNX = clipNX_1_pixel<Mode>(DX, NX, ARG);
 	unsigned tmpNY = clipNY_1(DY, NY, ARG, vdp.hasEVR());
@@ -3035,6 +3055,193 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 	this->calcFinishTime(tmpNX, tmpNY, isHS() ? (1 + 1 + 1) : (1 + 1 + 1 + waitLrmm + waitLrmm + waitLrmm));
 }
 
+
+void VDPCmdEngine::approxDrawn(unsigned units, const ApproxCost& cost)
+{
+	int p = vdp.isPlanar() ? 1 : 0;
+	auto ticks = unsigned((uint64_t(units) * cost.ticksPerUnit256[p]) >> 8) + cost.overhead[p];
+	approxDone = true;
+	approxEnd = engineTime + VDP::VDPClock::duration(ticks);
+	setStatusChangeTime(approxEnd);
+}
+
+// The loops below are the ones of the execute...Hs() functions without the
+// timing: same pixels, same final register values.
+template<typename Mode>
+unsigned VDPCmdEngine::approxHmmv(EmuTime time)
+{
+	const bool evr = vdp.isEVR();
+	const bool planar = vdp.isPlanar();
+	NY &= getYBitMask(evr);
+	unsigned tmpNX = clipNX_1_byte<Mode>(DX, NX, ARG);
+	unsigned tmpNY = clipNY_1(DY, NY, ARG, vdp.hasEVR());
+	int TX = (ARG & DIX)
+		? -Mode::PIXELS_PER_BYTE : Mode::PIXELS_PER_BYTE;
+	int TY = (ARG & DIY) ? -1 : 1;
+	ANX = clipNX_1_byte<Mode>(
+		ADX, ANX << Mode::PIXELS_PER_BYTE_SHIFT, ARG);
+	bool dstExt = getMXD(ARG, vdp.hasEVR());
+	bool doPset = !dstExt || hasExtendedVRAM;
+	unsigned units = 0;
+	while (true) {
+		if (doPset) [[likely]] {
+			vram.cmdWrite(Mode::addressOf(ADX, DY, evr, dstExt, planar),
+			              COL, time);
+		}
+		++units;
+		ADX += TX;
+		if (--ANX == 0) {
+			DY += TY; --NY;
+			ADX = DX; ANX = tmpNX;
+			if (--tmpNY == 0) break;
+		}
+	}
+	return units;
+}
+
+template<typename Mode>
+unsigned VDPCmdEngine::approxHmmm(EmuTime time)
+{
+	const bool evr = vdp.isEVR();
+	const bool planar = vdp.isPlanar();
+	NY &= getYBitMask(evr);
+	unsigned tmpNX = clipNX_2_byte<Mode>(SX, DX, NX, ARG);
+	unsigned tmpNY = clipNY_2(SY, DY, NY, ARG, vdp.hasEVR());
+	int TX = (ARG & DIX)
+	       ? -Mode::PIXELS_PER_BYTE : Mode::PIXELS_PER_BYTE;
+	int TY = (ARG & DIY) ? -1 : 1;
+	ANX = clipNX_2_byte<Mode>(
+		ASX, ADX, ANX << Mode::PIXELS_PER_BYTE_SHIFT, ARG);
+	bool srcExt  = getMXS(ARG, vdp.hasEVR());
+	bool dstExt  = getMXD(ARG, vdp.hasEVR());
+	bool doPoint = !srcExt || hasExtendedVRAM;
+	bool doPset  = !dstExt || hasExtendedVRAM;
+	unsigned units = 0;
+	while (true) {
+		if (doPoint) [[likely]] {
+			tmpSrc = vram.cmdReadWindow.readNP(Mode::addressOf(ASX, SY, evr, srcExt, planar));
+		} else {
+			tmpSrc = 0xFF;
+		}
+		if (doPset) [[likely]] {
+			vram.cmdWrite(Mode::addressOf(ADX, DY, evr, dstExt, planar),
+			              tmpSrc, time);
+		}
+		++units;
+		ASX += TX; ADX += TX;
+		if (--ANX == 0) {
+			SY += TY; DY += TY; --NY;
+			ASX = SX; ADX = DX; ANX = tmpNX;
+			if (--tmpNY == 0) break;
+		}
+	}
+	return units;
+}
+
+template<typename Mode, typename LogOp>
+unsigned VDPCmdEngine::approxLine(EmuTime time)
+{
+	const bool evr = vdp.isEVR();
+	const bool planar = vdp.isPlanar();
+	uint8_t CL = COL & Mode::COLOR_MASK;
+	int TX = (ARG & DIX) ? -1 : 1;
+	int TY = (ARG & DIY) ? -1 : 1;
+	bool dstExt = getMXD(ARG, vdp.hasEVR());
+	bool doPset = !dstExt || hasExtendedVRAM;
+	unsigned addr = Mode::addressOf(ADX, DY, evr, dstExt, planar);
+	unsigned units = 0;
+	while (true) {
+		if (doPset) [[likely]] {
+			tmpDst = vram.cmdWriteWindow.readNP(addr);
+			Mode::pset(time, vram, ADX, addr, tmpDst, CL, LogOp());
+		}
+		++units;
+		if ((ARG & MAJ) == 0) {
+			// X-Axis is major direction.
+			ADX += TX;
+			if (ANX++ == NX || (ADX & Mode::PIXELS_PER_LINE)) break;
+			if (ASX < NY) {
+				ASX += NX;
+				DY += TY;
+				if ((TY < 0) && (int(DY) < 0)) break;
+			}
+			ASX -= NY;
+			ASX &= 1023; // mask to 10 bits range
+		} else {
+			// Y-Axis is major direction.
+			DY += TY;
+			if ((TY < 0) && (int(DY) < 0)) break;
+			if (ASX < NY) {
+				ASX += NX;
+				ADX += TX;
+			}
+			ASX -= NY;
+			ASX &= 1023; // mask to 10 bits range
+			if (ANX++ == NX || (ADX & Mode::PIXELS_PER_LINE)) break;
+		}
+		addr = Mode::addressOf(ADX, DY, evr, dstExt, planar);
+	}
+	return units;
+}
+
+template<typename Mode, typename LogOp>
+unsigned VDPCmdEngine::approxLrmm(EmuTime time)
+{
+	const bool evr = vdp.isEVR();
+	const bool planar = vdp.isPlanar();
+	NY &= getYBitMask(evr);
+	unsigned tmpNX = clipNX_1_pixel<Mode>(DX, NX, ARG);
+	unsigned tmpNY = clipNY_1(DY, NY, ARG, vdp.hasEVR());
+	int TX = (ARG & DIX) ? -1 : 1;
+	int TY = (ARG & DIY) ? -1 : 1;
+	ANX = clipNX_1_pixel<Mode>(ADX, ANX, ARG);
+	bool srcExt  = getMXS(ARG, vdp.hasEVR());
+	bool dstExt  = getMXD(ARG, vdp.hasEVR());
+	bool doPoint = !srcExt || hasExtendedVRAM;
+	bool doPset  = !dstExt || hasExtendedVRAM;
+	unsigned dstAddr = Mode::addressOf(ADX, DY, evr, dstExt, planar);
+	unsigned units = 0;
+	while (true) {
+		if (doPoint) [[likely]] {
+			signed x = ASX_12P8 / 256;
+			signed y = (ARG & XHR) ? (ASY_12P8 / 512) : (ASY_12P8 / 256);
+			if ((signed)WSX <= x && x <= (signed)WEX && (signed)WSY <= y && y <= (signed)WEY) {
+				tmpSrc = Mode::point(vram, x, y, evr, srcExt, planar);
+			} else {
+				tmpSrc = COL;
+			}
+		} else {
+			tmpSrc = 0xFF;
+		}
+		if (doPset) [[likely]] {
+			tmpDst = vram.cmdWriteWindow.readNP(dstAddr);
+			Mode::pset(time, vram, ADX, dstAddr,
+			           tmpDst, tmpSrc, LogOp());
+		}
+		++units;
+		ASX_12P8 += VX;
+		ASY_12P8 += VY;
+		ADX += TX;
+		if (--ANX == 0) {
+			if (ARG & XHR) {
+				SX_12P8 -= VY * 2;
+				SY_12P8 += VX * 2;
+			} else {
+				SX_12P8 -= VY;
+				SY_12P8 += VX;
+			}
+			DY += TY; --NY;
+			ASX_12P8 = SX_12P8;
+			ASY_12P8 = SY_12P8;
+			ADX = DX;
+			ANX = tmpNX;
+			if (--tmpNY == 0) break;
+		}
+		dstAddr = Mode::addressOf(ADX, DY, evr, dstExt, planar);
+	}
+	return units;
+}
+
 VDPCmdEngine::VDPCmdEngine(VDP& vdp_, CommandController& commandController)
 	: vdp(vdp_), vram(vdp.getVRAM())
 	, cmdTraceSetting(
@@ -3058,6 +3265,12 @@ VDPCmdEngine::VDPCmdEngine(VDP& vdp_, CommandController& commandController)
 	, cmdForceHsSetting(
 		commandController, vdp_.getName() == "VDP" ? "force_hs" :
 		vdp_.getName() + " force_hs", "VDP commands always run in high-speed mode.",
+		false)
+	, cmdApproxTimingSetting(
+		commandController, vdp_.getName() == "VDP" ? "approx_cmd_timing" :
+		vdp_.getName() + " approx_cmd_timing",
+		"V9968 high-speed commands with approximate timing: much less host "
+		"CPU, the picture is the same but the timing is not cycle exact.",
 		false)
 {
 }
@@ -4126,6 +4339,12 @@ void VDPCmdEngine::executeCommandHs(EmuTime time)
 	// Start command.
 	status |= CE;
 	executingProbe = true;
+	approxDone = false;
+	approx = false;
+	if (cmdApproxTimingSetting.getBoolean() && isHS()) {
+		auto c = CMD >> 4;
+		approx = (c == 0x3) || (c == 0x7) || (c == 0xC) || (c == 0xD);
+	}
 
 	switch ((tmpScrMode << 4) | (CMD >> 4)) {
 	case 0x00: case 0x10: case 0x20: case 0x30: case 0x40:
@@ -4223,6 +4442,7 @@ void VDPCmdEngine::executeCommandHs(EmuTime time)
 
 	default: UNREACHABLE;
 	}
+	if (approx && CMD) sync2Hs(time); // draw now, CE drops at approxEnd
 }
 
 void VDPCmdEngine::sync2Hs(EmuTime time)
@@ -4946,6 +5166,7 @@ void VDPCmdEngine::commandDone(EmuTime time)
 	// Note: TR is not reset yet; it is reset when S#2 is read next.
 	status &= ~CE;
 	executingProbe = false;
+	approx = approxDone = false;
 	CMD = 0;
 	setStatusChangeTime(EmuTime::infinity());
 	vram.cmdReadWindow.disable(time);
@@ -4956,6 +5177,7 @@ void VDPCmdEngine::commandDone(EmuTime time)
 // version 1: initial version
 // version 2: replaced member 'Clock<> clock' with 'EmuTime time'
 // version 3: added 'phase', 'tmpSrc', 'tmpDst'
+// version 5: added 'approx', 'approxDone', 'approxEnd'
 // version 4: added 'lastXXX'. This is only used for debugging, so you could ask
 //            why this needs to be serialized. Maybe for savestate/replay-files
 //            it's not super useful, but it is important for reverse during a
@@ -5009,6 +5231,15 @@ void VDPCmdEngine::serialize(Archive& ar, unsigned version)
 		} else {
 			CMD = 0; // see note above
 		}
+	}
+
+	if (ar.versionAtLeast(version, 5)) {
+		ar.serialize("approx",     approx,
+		             "approxDone", approxDone,
+		             "approxEnd",  approxEnd);
+	} else {
+		assert(Archive::IS_LOADER);
+		approx = approxDone = false;
 	}
 
 	if (ar.versionAtLeast(version, 4)) {
