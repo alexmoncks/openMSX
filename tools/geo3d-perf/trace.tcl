@@ -3,15 +3,16 @@
 #
 # Equivalence trace for the VDP command engine (run by traces.sh). Environment:
 #   TRACE_OUT   output file
-#   TRACE_MODE  state | probe | frames | cmds
+#   TRACE_MODE  state | probe | frames | flips
 #   TRACE_END   emulated seconds to run
 #   TRACE_DT    state mode: sampling period in emulated seconds (default 0.0137)
 #   TRACE_TYPE  optional text to type, TRACE_TYPE_AT emulated second (default 6)
 # state: every TRACE_DT a chained CRC of VRAM, visible memory, CPU and VDP registers.
 # probe: a chained CRC of the emulated time of every command start and end.
-# cmds:   after every TRACE_NCMD-th VDP command (default 997), the CRC of the
-#         whole VRAM, indexed by command count instead of time: equal lines in
-#         two runs mean the same VRAM after the same commands, whatever the timing.
+# flips:  after every page flip (a change of VDP R#2, looked for every 2 ms),
+#         the CRC of the VRAM page now on display, numbered by flip instead of
+#         by time: equal lines in two runs mean the same sequence of pictures,
+#         whatever the timing.
 # frames: every TRACE_FDT (one NTSC frame), the CRC of the VRAM page on display (to compare pictures
 #         between runs whose timing differs, e.g. approx_cmd_timing on and off).
 proc tenv {name def} {
@@ -75,12 +76,32 @@ proc t_frame {} {
 	after time $::t_fdt t_frame
 }
 
-proc t_cmds {} {
-	# the probe changes twice per command: an even count is a command end
-	incr ::t_n
-	if {$::t_n % $::t_ncmd == 0} {
-		puts $::t_out [format "%d %08x" [expr {$::t_n / 2}] [zlib crc32 [debug read_block VRAM 0 [debug size VRAM]]]]
+proc t_page_crc {} {
+	set page [expr {([debug read "VDP regs" 2] >> 5) & 3}]
+	switch [expr {[debug read "VDP regs" 0] & 0x0E}] {
+		6 - 8   { set size 0x8000 }
+		10 - 14 { set size 0x10000 }
+		default { return - }
 	}
+	if {($page + 1) * $size > [debug size VRAM]} { return - }
+	return [format %08x [zlib crc32 [debug read_block VRAM [expr {$page * $size}] $size]]]
+}
+
+proc t_flip_sample {n} {
+	puts $::t_out "$n [t_page_crc]"
+}
+
+proc t_flips {} {
+	set r2 [debug read "VDP regs" 2]
+	if {$r2 != $::t_r2} {
+		set ::t_r2 $r2
+		incr ::t_n
+		# TRACE_FLIP_DELAY (seconds) samples later in the frame: a command
+		# still drawing in the page at the flip has finished by then
+		after time [tenv TRACE_FLIP_DELAY 0] [list t_flip_sample $::t_n]
+	}
+	if {[machine_info time] >= $::t_end} { t_finish }
+	after time 0.002 t_flips
 }
 
 proc t_finish {} {
@@ -95,10 +116,9 @@ if {[info exists ::env(TRACE_TYPE)]} {
 if {[tenv TRACE_MODE state] eq "frames"} {
 	set ::t_fdt [tenv TRACE_FDT 0.0166886]
 	after time $::t_fdt t_frame
-} elseif {[tenv TRACE_MODE state] eq "cmds"} {
-	set ::t_ncmd [expr {2 * [tenv TRACE_NCMD 997]}]
-	after time $::t_end t_finish
-	debug probe set_bp VDP.commandExecuting {} t_cmds
+} elseif {[tenv TRACE_MODE state] eq "flips"} {
+	set ::t_r2 [debug read "VDP regs" 2]
+	after time 0.002 t_flips
 } elseif {[tenv TRACE_MODE state] eq "probe"} {
 	after time $::t_end t_finish
 	# every VDP in the machine (the 88h profile has two)

@@ -41,14 +41,13 @@ cartridge profile next to a V9938, and BASIC drawing commands on the V9968
 without the fast mode and on a plain V9938. A full run takes about 10 minutes.
 
 Two more modes compare runs whose timing differs on purpose (`MODES=frames`
-or `MODES=cmds`, with `OPENMSX_SET="approx_cmd_timing on"` for one of the two
+or `MODES=flips`, with `OPENMSX_SET="approx_cmd_timing on"` for one of the two
 sets):
 
 - `frames`: one line per frame period, the CRC of the VRAM page on display.
-- `cmds`: after every 997th VDP command, the CRC of the whole VRAM, indexed
-  by command count. Slow: it follows every command through a Tcl callback.
-  Run its workloads one at a time (`ONLY=...`), several at once need a lot
-  of memory.
+- `flips`: after every page flip (a change of VDP R#2), the CRC of the page
+  now on display, numbered by flip instead of by time. Equal files mean the
+  same sequence of pictures, whatever the timing.
 
 Every run uses a private copy of `~/.openMSX/share/settings.xml`: openMSX
 saves the settings on exit, and a test setting must not end up in that file.
@@ -81,14 +80,23 @@ Checked on 2026-10-10:
 - setting on, command starts and ends in the same emulated time: demo ROM,
   shooter and the 88h profile equal, SPHERE7 +0.025 %, demo ROM on the
   turboR +0.013 %;
-- setting on, picture on display per frame: 99.6 % to 99.95 % of the
-  pictures also occur in the exact run, shifted by 0 to 3 frames (SPHERE7
-  runs 2 frames ahead after its start-up); the rest are at start-up and in
-  the shooter, where the page on display is being drawn.
+- setting on, sequence of pictures by page flip (`MODES=flips`), 150 s of
+  SPHERE7 (8,707 flips), 345 s of the demo ROM (8,440) and 150 s of the demo
+  ROM on the turboR (3,491): identical when the page is sampled 12 ms after
+  the flip (`TRACE_FLIP_DELAY=0.012`). Sampled right at the flip, 1 to 7
+  pictures differ in each: a command is still drawing in that page in the
+  exact run, while the approximate run has drawn it at once. The approximate
+  runs make one or two flips more in the same time (two of them at one demo
+  transition);
+- the shooter (3,431 flips): identical at the flip except flip 3; 12 ms
+  later 29 differ, the game draws in the page on display.
 
-Not checked yet: the `cmds` comparison (same VRAM after the same commands),
-and the cost table for LINE in SCREEN 7/8, which is a guess. LMMM is not
-covered (the 1 MB game uses it).
+Open: the cost table for LINE in SCREEN 7/8 is a guess (no workload uses
+it), and LMMM is not covered (the 1 MB game uses it).
+
+A trace mode that read the VRAM inside the `commandExecuting` probe callback
+hung the exact path (the read re-enters the command engine while a command
+is ending); it was replaced by `flips`.
 
 ## Exact optimizations that did not pay
 
