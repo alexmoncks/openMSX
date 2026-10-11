@@ -1,0 +1,98 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Alex Moncks
+#
+# geo3d: start the openMSX fork (V9968 + geo3d) on a Raspberry Pi, from the
+# text console, without X (SDL2 on KMS/DRM).
+#
+#   geo3d demo | sphere | shooter      the bundled ROMs
+#   geo3d rom <file> [openmsx args]    another ASCII16 ROM for the 98h profile
+#   geo3d bench                        speed measurement, no video (about 10 minutes)
+#   geo3d exact <demo|sphere|...>      the same with the exact command timing
+#   geo3d msx [openmsx args]           plain openMSX with these settings
+#
+# Leave openMSX with Alt+F4 (or F10, then "exit" in the console).
+HERE=/opt/openmsx-geo3d
+BIN=$HERE/bin/openmsx
+ROMS=$HERE/roms
+LOG=$HOME/geo3d-last.log
+export OPENMSX_SYSTEM_DATA=$HERE/share
+: "${SDL_VIDEODRIVER:=kmsdrm}"
+export SDL_VIDEODRIVER
+
+# Sound: the HDMI output when there is one, unless AUDIODEV says otherwise
+# (e.g. AUDIODEV=default:CARD=Headphones geo3d demo, see "aplay -L").
+if [ -z "$AUDIODEV" ]; then
+	card=$(sed -n 's/^ *[0-9]* \[\(vc4hdmi[0-9]*\) *\].*/\1/p' /proc/asound/cards 2>/dev/null | head -1)
+	[ -n "$card" ] && export AUDIODEV="default:CARD=$card"
+fi
+
+APPROX=on
+if [ "$1" = "exact" ]; then APPROX=off; shift; fi
+
+# Settings chosen for a Pi 3: the approximate command timing, no scanline or
+# blur shader work, and frames may be skipped before the sound breaks up.
+SETTINGS="set approx_cmd_timing $APPROX; set fullscreen on; set scanline 0; set blur 0; set glow 0; set maxframeskip 3; set save_settings_on_exit off"
+M98=(-machine C-BIOS_V9968_JP -ext geo3d)
+
+publish() { # copy a file next to the installer on the boot partition (readable from Windows)
+	local dst=/boot/firmware/geo3d-rpi
+	[ -d "$dst" ] && sudo -n cp "$1" "$dst/" 2>/dev/null
+}
+
+run() {
+	echo "== $(date) : $*" > "$LOG"
+	"$BIN" "$@" -command "$SETTINGS" >> "$LOG" 2>&1
+	local rc=$?
+	if [ $rc -ne 0 ]; then
+		echo "openMSX ended with status $rc; the log is $LOG:"
+		tail -15 "$LOG"
+	fi
+	publish "$LOG"
+	return $rc
+}
+
+bench_one() { # label rom timing renderer throttle seconds
+	local label=$1 rom=$2 timing=$3 renderer=$4 throttle=$5 secs=$6
+	printf '%-10s %-7s video=%-8s ' "$label" "$timing" "$renderer"
+	local out
+	out=$(BENCH_RENDERER=$renderer BENCH_THROTTLE=$throttle BENCH_END=$secs BENCH_WIN=$((secs - 20)) \
+		OPENMSX_SET="approx_cmd_timing $([ $timing = approx ] && echo on || echo off) save_settings_on_exit off maxframeskip 3" \
+		"$BIN" "${M98[@]}" -cart "$ROMS/$rom" -romtype ASCII16 -script "$HERE/tools/bench.tcl" 2>&1 | grep -a BENCH | tail -1)
+	echo "${out:-FAILED (see $LOG)}" | sed 's/^BENCH *//'
+}
+
+case "$1" in
+demo)    run "${M98[@]}" -cart "$ROMS/GEO3D_98.ROM" -romtype ASCII16 ;;
+sphere)  run "${M98[@]}" -cart "$ROMS/SPHERE7_98.ROM" -romtype ASCII16 ;;
+shooter) run "${M98[@]}" -cart "$ROMS/GEO3D_SHOOTER_98.ROM" -romtype ASCII16 ;;
+rom)     shift; f=$1; shift; run "${M98[@]}" -cart "$f" -romtype ASCII16 "$@" ;;
+msx)     shift; run "$@" ;;
+bench)
+	R=$HOME/geo3d-bench.txt
+	{
+		echo "geo3d bench, $(date)"
+		echo "board: $(tr -d '\0' < /proc/device-tree/model 2>/dev/null)"
+		echo "kernel: $(uname -srm), temp: $(vcgencmd measure_temp 2>/dev/null), throttled: $(vcgencmd get_throttled 2>/dev/null)"
+		echo "speed = emulated time / real time without throttle; cpu_per_emusec = CPU seconds per emulated second"
+		echo
+		echo "-- no video, as fast as possible"
+		bench_one sphere7 SPHERE7_98.ROM exact  none off 80
+		bench_one sphere7 SPHERE7_98.ROM approx none off 80
+		bench_one demo    GEO3D_98.ROM   exact  none off 140
+		bench_one demo    GEO3D_98.ROM   approx none off 140
+		bench_one shooter GEO3D_SHOOTER_98.ROM approx none off 80
+		echo
+		echo "-- with video on the screen, real time (speed should be 100 %)"
+		bench_one sphere7 SPHERE7_98.ROM approx SDLGL-PP on 60
+		bench_one demo    GEO3D_98.ROM   approx SDLGL-PP on 80
+		echo
+		echo "temp after: $(vcgencmd measure_temp 2>/dev/null), throttled: $(vcgencmd get_throttled 2>/dev/null)"
+	} 2>&1 | tee "$R"
+	publish "$R"
+	echo "Saved in $R (and on the boot partition, folder geo3d-rpi)."
+	;;
+*)
+	sed -n '5,14p' "$0" | sed 's/^# \{0,1\}//'
+	;;
+esac
