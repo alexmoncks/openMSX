@@ -29,8 +29,10 @@ No system ROMs are bundled, only C-BIOS.
 1. Write Raspberry Pi OS Lite (64 bit) to the card with Raspberry Pi Imager
    (set the user, and the Wi-Fi if there is no cable, in its settings).
 2. Copy the `geo3d-rpi` folder to the card's boot partition (`bootfs`).
-3. Boot, log in and run `sudo bash /boot/firmware/geo3d-rpi/install.sh`
-   (it needs the network for apt). Log out and in again.
+3. Boot, log in and run `sudo bash /boot/firmware/geo3d-rpi/install.sh`.
+   It uses apt when the Pi has a network connection; without one it installs
+   from `geo3d-rpi/debs` (bundle made with `OFFLINE=1`), only the packages
+   the system does not have yet. Log out and in again.
 4. `geo3d bench`, then `geo3d demo`, `geo3d sphere`, `geo3d shooter`.
 
 `geo3d bench` writes `geo3d-bench.txt`, and every run writes

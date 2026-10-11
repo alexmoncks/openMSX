@@ -10,6 +10,8 @@
 #                  in ~/.openMSX/share/machines, not in this tree)
 #   CHROOT         the Debian trixie cross chroot, used to name the runtime packages
 #
+#   OFFLINE=1      also fill <outdir>/geo3d-rpi/debs for a Pi without network
+#
 # Writes <outdir>/geo3d-rpi/{install.sh,packages.txt,openmsx-geo3d-rpi.tar.gz}:
 # that folder goes on the boot partition of the SD card.
 set -e
@@ -59,6 +61,25 @@ mkdir -p "$OUT/geo3d-rpi"
 } | sort -u > "$OUT/geo3d-rpi/packages.txt"
 
 tar -czf "$OUT/geo3d-rpi/openmsx-geo3d-rpi.tar.gz" -C "$W" openmsx-geo3d
+
+# OFFLINE=1: also download every runtime package with its whole dependency
+# closure (resolved against an empty system, about 100 MB), for a Pi without
+# network. install.sh then installs the ones the Pi does not have.
+if [ -n "$OFFLINE" ]; then
+	cp "$OUT/geo3d-rpi/packages.txt" "$CHROOT/root/packages.txt"
+	chroot "$CHROOT" /bin/bash -e <<'EOF'
+rm -rf /root/debs /root/empty; mkdir -p /root/debs/partial /root/empty
+: > /root/empty/status
+apt-get update -q > /dev/null
+apt-get install -y -q --download-only --no-install-recommends \
+	-o APT::Architecture=arm64 -o APT::Architectures::=arm64 \
+	-o Dir::State::status=/root/empty/status -o Dir::Cache::archives=/root/debs \
+	$(cat /root/packages.txt) > /dev/null
+EOF
+	rm -rf "$OUT/geo3d-rpi/debs"; mkdir -p "$OUT/geo3d-rpi/debs"
+	cp "$CHROOT"/root/debs/*.deb "$OUT/geo3d-rpi/debs/"
+	echo "offline packages: $(ls "$OUT/geo3d-rpi/debs" | wc -l)"
+fi
 cp "$TOOLS/install.sh" "$OUT/geo3d-rpi/"
 ls -la "$OUT/geo3d-rpi"
 echo "packages: $(tr '\n' ' ' < "$OUT/geo3d-rpi/packages.txt")"
