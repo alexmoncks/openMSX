@@ -33,7 +33,19 @@ No system ROMs are bundled, only C-BIOS.
    It uses apt when the Pi has a network connection; without one it installs
    from `geo3d-rpi/debs` (bundle made with `OFFLINE=1`), only the packages
    the system does not have yet. Log out and in again.
-4. `geo3d bench`, then `geo3d demo`, `geo3d sphere`, `geo3d shooter`.
+4. `geo3d menu` shows the bundled ROMs and every `*.rom` found in the
+   `roms` folder of the boot partition (`bootfs/roms` on a PC,
+   `/boot/firmware/roms` on the Pi); Alt+F4 in openMSX comes back to the
+   menu. `geo3d autostart on` opens it when the Pi is switched on (console
+   autologin plus a hook in `~/.profile`).
+5. `geo3d bench` measures the speed; `geo3d demo`, `geo3d sphere` and
+   `geo3d shooter` start one ROM directly.
+
+The mapper type of a ROM in `roms` comes from a `NAME.rom.args` file with
+openMSX arguments, else the `ROM_AS16` signature at offset 16, else the name
+of its sub-folder (`roms/ASCII8/GAME.rom`), else openMSX guesses. The menu
+also picks the machine and the command timing; system ROMs for other
+machines go in `bootfs/systemroms`. `roms/geo3d.conf` holds `MENU_LANG`.
 
 `geo3d bench` writes `geo3d-bench.txt`, and every run writes
 `geo3d-last.log`; both are copied to `bootfs/geo3d-rpi`, where a PC can read

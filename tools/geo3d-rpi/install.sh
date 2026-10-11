@@ -66,6 +66,30 @@ tar -xzf "$BUNDLE" -C /opt
 chmod +x /opt/openmsx-geo3d/bin/openmsx /opt/openmsx-geo3d/geo3d
 ln -sf /opt/openmsx-geo3d/geo3d /usr/local/bin/geo3d
 
+echo "== ROM folders on the boot partition (a PC shows it as the drive bootfs)"
+B=/boot/firmware
+mkdir -p $B/roms $B/systemroms
+lang=$(sed -n 's/^MENU_LANG=//p' /opt/openmsx-geo3d/geo3d.conf 2>/dev/null | tail -1)
+[ -f $B/roms/geo3d.conf ] || printf '%s\r\n' \
+	"# geo3d menu. Lines are KEY=value." \
+	"# MENU_LANG: pt or en" \
+	"MENU_LANG=${lang:-en}" > $B/roms/geo3d.conf
+printf '%s\r\n' \
+	"ROMs para o menu do geo3d / ROMs for the geo3d menu" \
+	"" \
+	"PT: copie aqui os arquivos .ROM. Eles aparecem no menu ao ligar o Pi (comando: geo3d menu)." \
+	"Tipo de mapper, nesta ordem:" \
+	"  1. um arquivo NOME.ROM.args ao lado do ROM, com argumentos do openMSX, por exemplo: -romtype Konami" \
+	"  2. a assinatura ROM_AS16 dentro do ROM (os ROMs do geo3d ja tem): ASCII16" \
+	"  3. o nome da subpasta: roms\ASCII8\JOGO.ROM usa -romtype ASCII8" \
+	"  4. sem nada disso, o openMSX tenta descobrir sozinho." \
+	"ROMs de sistema (BIOS de outras maquinas) vao na pasta systemroms, ao lado desta." \
+	"" \
+	"EN: copy .ROM files here. They show up in the menu (command: geo3d menu)." \
+	"Mapper type, in this order: a NAME.ROM.args file with openMSX arguments (e.g. -romtype Konami);" \
+	"the ROM_AS16 signature inside the ROM; the sub-folder name (roms\ASCII8\GAME.ROM); else openMSX guesses." \
+	"System ROMs go in the systemroms folder, next to this one." > $B/roms/LEIA-ME.txt
+
 # the user who called sudo needs the screen, the GPU, the keyboard and the sound
 U=${SUDO_USER:-$(logname 2>/dev/null || true)}
 if [ -n "$U" ] && [ "$U" != root ]; then
@@ -83,5 +107,6 @@ fi
 OPENMSX_SYSTEM_DATA=/opt/openmsx-geo3d/share /opt/openmsx-geo3d/bin/openmsx -v | head -2
 echo
 echo "Installed. Log out and in again (new groups), then:"
-echo "  geo3d bench     speed measurement, about 10 minutes"
-echo "  geo3d demo      the geo3d demo ROM (also: sphere, shooter)"
+echo "  geo3d menu            pick a ROM (the bundled ones and the ones in bootfs/roms)"
+echo "  geo3d autostart on    open that menu when the Pi is switched on"
+echo "  geo3d bench           speed measurement, about 10 minutes"

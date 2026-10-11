@@ -10,6 +10,7 @@
 #                  in ~/.openMSX/share/machines, not in this tree)
 #   CHROOT         the Debian trixie cross chroot, used to name the runtime packages
 #
+#   MENU_LANG      pt or en: the language of the menu on a fresh install
 #   OFFLINE=1      also fill <outdir>/geo3d-rpi/debs for a Pi without network
 #
 # Writes <outdir>/geo3d-rpi/{install.sh,packages.txt,openmsx-geo3d-rpi.tar.gz}:
@@ -47,6 +48,8 @@ for r in GEO3D_98.ROM SPHERE7_98.ROM game/GEO3D_SHOOTER_98.ROM; do
 done
 cp "$TOOLS/../geo3d-perf/bench.tcl" "$D/tools/"
 cp "$TOOLS/geo3d" "$D/geo3d"
+# MENU_LANG=pt: the menu language a fresh install starts with (default: the Pi's locale)
+[ -n "$MENU_LANG" ] && echo "MENU_LANG=$MENU_LANG" > "$D/geo3d.conf"
 chmod +x "$D/geo3d" "$D/bin/openmsx"
 git -C "$REPO" log -1 --format='openMSX fork %h (%s), bundled %ad' --date=short > "$D/VERSION" 2>/dev/null || true
 

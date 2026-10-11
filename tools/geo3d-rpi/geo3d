@@ -5,16 +5,28 @@
 # geo3d: start the openMSX fork (V9968 + geo3d) on a Raspberry Pi, from the
 # text console, without X (SDL2 on KMS/DRM).
 #
+#   geo3d menu                         pick a ROM from a menu (Alt+F4 in openMSX comes back to it)
 #   geo3d demo | sphere | shooter      the bundled ROMs
-#   geo3d rom <file> [openmsx args]    another ASCII16 ROM for the 98h profile
-#   geo3d bench                        speed measurement, no video (about 10 minutes)
+#   geo3d rom <file> [openmsx args]    one ROM file
+#   geo3d list                         the ROMs the menu would show, with their arguments
+#   geo3d bench                        speed measurement (about 10 minutes)
 #   geo3d exact <demo|sphere|...>      the same with the exact command timing
 #   geo3d msx [openmsx args]           plain openMSX with these settings
+#   geo3d autostart on | off           open the menu when the Pi is switched on
 #
-# Leave openMSX with Alt+F4 (or F10, then "exit" in the console).
-HERE=/opt/openmsx-geo3d
-BIN=$HERE/bin/openmsx
+# ROMs: any *.rom in the "roms" folder of the SD card's boot partition (the
+# drive a PC shows as "bootfs", /boot/firmware/roms here) appears in the menu.
+# The mapper type of a ROM comes from, in this order: a file NAME.rom.args
+# with openMSX arguments (e.g. "-romtype Konami"); the "ROM_AS16" signature
+# at offset 16; the name of the sub-folder it is in (roms/ASCII8/GAME.rom);
+# otherwise openMSX guesses. System ROMs go in "systemroms", next to "roms".
+#
+# Leave openMSX with Alt+F4.
+HERE=${GEO3D_HOME:-/opt/openmsx-geo3d}
+BIN=${GEO3D_BIN:-$HERE/bin/openmsx}
 ROMS=$HERE/roms
+ROMDIR=${GEO3D_ROMDIR:-/boot/firmware/roms}
+STATE=$HOME/.config/geo3d
 LOG=$HOME/geo3d-last.log
 export OPENMSX_SYSTEM_DATA=$HERE/share
 : "${SDL_VIDEODRIVER:=kmsdrm}"
@@ -27,15 +39,69 @@ if [ -z "$AUDIODEV" ]; then
 	[ -n "$card" ] && export AUDIODEV="default:CARD=$card"
 fi
 
-APPROX=on
-if [ "$1" = "exact" ]; then APPROX=off; shift; fi
+# ---------------------------------------------------------------- settings
+# KEY=value files: what the menu remembers ($STATE/state), then the file on
+# the SD card (roms/geo3d.conf, editable on a PC), then the bundle's default.
+conf_get() { # file key
+	[ -f "$1" ] && tr -d '\r' < "$1" | sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" | tail -1
+}
+setting() { # key default
+	local f v
+	for f in "$STATE/state" "$ROMDIR/geo3d.conf" "$HERE/geo3d.conf"; do
+		v=$(conf_get "$f" "$1")
+		if [ -n "$v" ]; then echo "$v"; return; fi
+	done
+	echo "$2"
+}
+remember() { # key value
+	mkdir -p "$STATE"
+	touch "$STATE/state"
+	sed -i "/^$1=/d" "$STATE/state"
+	echo "$1=$2" >> "$STATE/state"
+}
+
+TIMING=$(setting TIMING approx)
+if [ "$1" = "exact" ]; then TIMING=exact; shift; fi
+MACHINE=$(setting MACHINE C-BIOS_V9968_JP)
+
+case "$(setting MENU_LANG "${LC_ALL:-${LC_MESSAGES:-$LANG}}")" in
+pt*)
+	T_TITLE="MSX com V9968 e geo3d"
+	T_PICK="Escolha o que rodar. No openMSX, Alt+F4 volta para este menu.
+Para acrescentar ROMs: pasta \"roms\" da unidade bootfs do cartão."
+	T_SD="cartão"; T_BUNDLE="pacote"
+	T_MACHINE="Máquina"; T_TIMING="Tempo dos comandos do VDP"
+	T_APPROX="aproximado (rápido)"; T_EXACT="exato (lento)"
+	T_BENCH="Medir a velocidade (10 minutos)"; T_SHELL="Sair para o console"
+	T_REBOOT="Reiniciar"; T_POWEROFF="Desligar"
+	T_FAILED="O openMSX terminou com erro. Fim do registro:"
+	T_BACK="Digite \"geo3d menu\" para voltar ao menu."
+	T_ENTER="Enter para voltar ao menu."
+	T_PICKM="Máquina para os ROMs (as que pedem ROMs de sistema precisam deles na pasta \"systemroms\" do cartão):"
+	;;
+*)
+	T_TITLE="MSX with V9968 and geo3d"
+	T_PICK="Pick what to run. In openMSX, Alt+F4 comes back to this menu.
+To add ROMs: the \"roms\" folder of the card's bootfs drive."
+	T_SD="card"; T_BUNDLE="bundle"
+	T_MACHINE="Machine"; T_TIMING="VDP command timing"
+	T_APPROX="approximate (fast)"; T_EXACT="exact (slow)"
+	T_BENCH="Measure the speed (10 minutes)"; T_SHELL="Leave to the console"
+	T_REBOOT="Restart"; T_POWEROFF="Switch off"
+	T_FAILED="openMSX ended with an error. End of the log:"
+	T_BACK="Type \"geo3d menu\" to come back to the menu."
+	T_ENTER="Enter to go back to the menu."
+	T_PICKM="Machine for the ROMs (the ones that need system ROMs want them in the card's \"systemroms\" folder):"
+	;;
+esac
 
 # Settings chosen for a Pi 3: the approximate command timing, no scanline or
 # blur shader work, and frames may be skipped before the sound breaks up.
-SETTINGS="set approx_cmd_timing $APPROX; set fullscreen on; set scanline 0; set blur 0; set glow 0; set maxframeskip 3; set save_settings_on_exit off"
-M98=(-machine C-BIOS_V9968_JP -ext geo3d)
+openmsx_settings() {
+	echo "set approx_cmd_timing $([ "$TIMING" = exact ] && echo off || echo on); set fullscreen on; set scanline 0; set blur 0; set glow 0; set maxframeskip 3; set save_settings_on_exit off"
+}
 
-publish() { # copy a file next to the installer on the boot partition (readable from Windows)
+publish() { # copy a file next to the installer on the boot partition (readable from a PC)
 	local dst=/boot/firmware/geo3d-rpi
 	[ -d "$dst" ] && sudo -n cp "$1" "$dst/" 2>/dev/null
 }
@@ -55,17 +121,139 @@ quiet_gui() {
 	fi
 }
 
+# System ROMs dropped in the card's "systemroms" folder: openMSX searches its
+# own systemroms directory recursively, so a link inside it is enough.
+link_systemroms() {
+	local sd
+	sd=$(dirname "$ROMDIR")/systemroms
+	[ -d "$sd" ] || return
+	mkdir -p "$HOME/.openMSX/share/systemroms"
+	ln -sfn "$sd" "$HOME/.openMSX/share/systemroms/sd"
+}
+
 run() {
 	echo "== $(date) : $*" > "$LOG"
 	quiet_gui
-	"$BIN" "$@" -command "$SETTINGS" >> "$LOG" 2>&1
+	link_systemroms
+	"$BIN" "$@" -command "$(openmsx_settings)" >> "$LOG" 2>&1
 	local rc=$?
-	if [ $rc -ne 0 ]; then
+	if [ $rc -ne 0 ] && [ -z "$IN_MENU" ]; then
 		echo "openMSX ended with status $rc; the log is $LOG:"
 		tail -15 "$LOG"
 	fi
 	publish "$LOG"
 	return $rc
+}
+
+# ---------------------------------------------------------------- ROMs
+rom_args() { # file -> the openMSX arguments that describe its mapper
+	local f=$1 dir
+	if [ -f "$f.args" ]; then tr -d '\r\n' < "$f.args"; return; fi
+	if [ "$(dd if="$f" bs=1 skip=16 count=8 2>/dev/null | tr -d '\0')" = ROM_AS16 ]; then
+		echo "-romtype ASCII16"; return
+	fi
+	case "$f" in "$ROMS"/*) echo "-romtype ASCII16"; return ;; esac
+	dir=$(dirname "$f")
+	[ "$dir" != "$ROMDIR" ] && echo "-romtype $(basename "$dir")"
+}
+
+launch_rom() { # file [more openMSX arguments]
+	local f=$1 extra; shift
+	read -r -a extra <<< "$(rom_args "$f")"
+	case " ${extra[*]} " in
+	*" -machine "*) run -cart "$f" "${extra[@]}" "$@" ;;
+	*) run -machine "$MACHINE" -ext geo3d -cart "$f" "${extra[@]}" "$@" ;;
+	esac
+}
+
+scan_roms() { # fills R_PATH and R_LABEL: the bundled ROMs, then the card's
+	R_PATH=(); R_LABEL=()
+	local f
+	while IFS= read -r -d '' f; do
+		R_PATH+=("$f"); R_LABEL+=("$(basename "${f%.*}")  [$T_BUNDLE]")
+	done < <(find "$ROMS" -maxdepth 1 -type f -iname '*.rom' -print0 2>/dev/null | sort -z)
+	while IFS= read -r -d '' f; do
+		R_PATH+=("$f"); R_LABEL+=("$(basename "${f%.*}")  [$T_SD]")
+	done < <(find "$ROMDIR" -type f -iname '*.rom' -print0 2>/dev/null | sort -z)
+}
+
+# ---------------------------------------------------------------- menu
+pick() { # title text default tag label... -> the chosen tag on stdout
+	local title=$1 text=$2 def=$3; shift 3
+	local rows cols
+	rows=$(tput lines 2>/dev/null || echo 24); cols=$(tput cols 2>/dev/null || echo 80)
+	local h=$((rows - 2)) w=$((cols - 6))
+	[ $w -gt 76 ] && w=76
+	whiptail --title "$title" --nocancel --default-item "$def" --menu "$text" $h $w $((h - 9)) "$@" 3>&1 1>&2 2>&3
+}
+
+pick_machine() {
+	local items=() f n
+	for f in "$HERE"/share/machines/*V9968*.xml "$HOME"/.openMSX/share/machines/*.xml; do
+		[ -f "$f" ] || continue
+		n=$(basename "$f" .xml)
+		items+=("$n" "")
+	done
+	n=$(pick "$T_MACHINE" "$T_PICKM" "$MACHINE" "${items[@]}") || return
+	MACHINE=$n
+	remember MACHINE "$MACHINE"
+}
+
+menu() {
+	if ! command -v whiptail > /dev/null; then
+		echo "whiptail is missing (sudo apt install whiptail); use: geo3d list, geo3d rom <file>"
+		return 1
+	fi
+	export IN_MENU=1
+	sudo -n dmesg -n 1 2> /dev/null   # keep kernel messages off the menu
+	local last choice items i timing
+	last=$(setting LAST 1)
+	while true; do
+		scan_roms
+		items=()
+		for i in "${!R_PATH[@]}"; do items+=("$((i + 1))" "${R_LABEL[$i]}"); done
+		timing=$([ "$TIMING" = exact ] && echo "$T_EXACT" || echo "$T_APPROX")
+		items+=("-" "" "M" "$T_MACHINE: $MACHINE" "T" "$T_TIMING: $timing" "B" "$T_BENCH" \
+		        "S" "$T_SHELL" "R" "$T_REBOOT" "P" "$T_POWEROFF")
+		choice=$(pick "$T_TITLE" "$T_PICK" "$last" "${items[@]}") || break
+		case "$choice" in
+		-) ;;
+		M) pick_machine ;;
+		T) TIMING=$([ "$TIMING" = exact ] && echo approx || echo exact); remember TIMING "$TIMING" ;;
+		B) clear; IN_MENU= "$0" bench; echo; read -r -p "$T_ENTER" _ ;;
+		S) break ;;
+		R) clear; sudo reboot; exit ;;
+		P) clear; sudo poweroff; exit ;;
+		*)
+			last=$choice; remember LAST "$last"
+			clear
+			if ! launch_rom "${R_PATH[$((choice - 1))]}"; then
+				whiptail --title "$T_TITLE" --msgbox "$T_FAILED
+
+$(tail -12 "$LOG" | cut -c1-70)" 22 76
+			fi
+			;;
+		esac
+	done
+	clear
+	echo "$T_BACK"
+}
+
+autostart() { # on | off
+	local profile=$HOME/.profile
+	sed -i '/^# >>> geo3d autostart/,/^# <<< geo3d autostart/d' "$profile" 2> /dev/null
+	if [ "$1" = on ]; then
+		cat >> "$profile" <<'EOF'
+# >>> geo3d autostart
+if [ "$(tty)" = /dev/tty1 ] && [ -z "$SSH_CONNECTION" ]; then geo3d menu; fi
+# <<< geo3d autostart
+EOF
+		# log in on the console without asking for the password
+		sudo raspi-config nonint do_boot_behaviour B2 || echo "could not turn on the console autologin (raspi-config)"
+		echo "The menu opens when the Pi is switched on. \"geo3d autostart off\" undoes it."
+	else
+		echo "The menu no longer opens by itself (the console autologin was left as it is)."
+	fi
 }
 
 bench_one() { # label rom timing renderer throttle seconds
@@ -74,16 +262,25 @@ bench_one() { # label rom timing renderer throttle seconds
 	local out
 	out=$(BENCH_RENDERER=$renderer BENCH_THROTTLE=$throttle BENCH_END=$secs BENCH_WIN=$((secs - 20)) \
 		OPENMSX_SET="approx_cmd_timing $([ $timing = approx ] && echo on || echo off) save_settings_on_exit off maxframeskip 3" \
-		"$BIN" "${M98[@]}" -cart "$ROMS/$rom" -romtype ASCII16 -script "$HERE/tools/bench.tcl" 2>&1 | grep -a BENCH | tail -1)
+		"$BIN" -machine C-BIOS_V9968_JP -ext geo3d -cart "$ROMS/$rom" -romtype ASCII16 -script "$HERE/tools/bench.tcl" 2>&1 | grep -a BENCH | tail -1)
 	echo "${out:-FAILED (see $LOG)}" | sed 's/^BENCH *//'
 }
 
 case "$1" in
-demo)    run "${M98[@]}" -cart "$ROMS/GEO3D_98.ROM" -romtype ASCII16 ;;
-sphere)  run "${M98[@]}" -cart "$ROMS/SPHERE7_98.ROM" -romtype ASCII16 ;;
-shooter) run "${M98[@]}" -cart "$ROMS/GEO3D_SHOOTER_98.ROM" -romtype ASCII16 ;;
-rom)     shift; f=$1; shift; run "${M98[@]}" -cart "$f" -romtype ASCII16 "$@" ;;
+menu)    menu ;;
+demo)    launch_rom "$ROMS/GEO3D_98.ROM" ;;
+sphere)  launch_rom "$ROMS/SPHERE7_98.ROM" ;;
+shooter) launch_rom "$ROMS/GEO3D_SHOOTER_98.ROM" ;;
+rom)     shift; launch_rom "$@" ;;
 msx)     shift; run "$@" ;;
+list)
+	scan_roms
+	for i in "${!R_PATH[@]}"; do
+		printf '%2d  %-34s %s   %s\n' "$((i + 1))" "${R_LABEL[$i]}" "$(rom_args "${R_PATH[$i]}")" "${R_PATH[$i]}"
+	done
+	echo "machine: $MACHINE, timing: $TIMING, ROM folder: $ROMDIR"
+	;;
+autostart) autostart "$2" ;;
 bench)
 	R=$HOME/geo3d-bench.txt
 	{
@@ -109,6 +306,6 @@ bench)
 	echo "Saved in $R (and on the boot partition, folder geo3d-rpi)."
 	;;
 *)
-	sed -n '5,14p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '5,23p' "$0" | sed 's/^# \{0,1\}//'
 	;;
 esac
