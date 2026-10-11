@@ -40,8 +40,24 @@ publish() { # copy a file next to the installer on the boot partition (readable 
 	[ -d "$dst" ] && sudo -n cp "$1" "$dst/" 2>/dev/null
 }
 
+# The fork opens its "Quick Setup Editor" window by default. An open GUI window
+# keeps the menu bar on screen and takes the keyboard away from the MSX, and it
+# can only be closed with a mouse. openMSX remembers its windows in imgui.ini:
+# start with that one closed (GEO3D_KEEP_GUI=1 leaves the file alone).
+quiet_gui() {
+	[ -n "$GEO3D_KEEP_GUI" ] && return
+	local ini=$HOME/.openMSX/share/imgui.ini
+	if [ -f "$ini" ]; then
+		sed -i 's/^showQuickSetupEditor=1/showQuickSetupEditor=0/' "$ini"
+	else
+		mkdir -p "$(dirname "$ini")"
+		printf '[openmsx][machine]\nshowQuickSetupEditor=0\n' > "$ini"
+	fi
+}
+
 run() {
 	echo "== $(date) : $*" > "$LOG"
+	quiet_gui
 	"$BIN" "$@" -command "$SETTINGS" >> "$LOG" 2>&1
 	local rc=$?
 	if [ $rc -ne 0 ]; then
