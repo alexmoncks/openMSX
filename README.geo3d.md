@@ -11,6 +11,39 @@ geo3d itself, its RTL, its reference model and the demo ROM live in
 with a page of the demos in English, Portuguese and Spanish:
 [geo3d/demos](https://github.com/alexmoncks/V9968_Cartridge/tree/geo3d-phase2/geo3d/demos).
 
+## This branch: geo3d v2.0
+
+`geo3d-v2.0` is the `geo3d` branch with the device brought to **geo3d v2.0**,
+the development version described in
+[geo3d/docs/geo3d_v2.md](https://github.com/alexmoncks/V9968_Cartridge/blob/geo3d-v2.0/geo3d/docs/geo3d_v2.md)
+(branch `geo3d-v2.0` of V9968_Cartridge). v2.0 is not the version in HRA!'s
+official V9968 distribution, which is v1.0.0, and has not run on hardware.
+
+- 1023 vertices, edges and faces (v1.0.0: 255): 10-bit counts and write
+  pointers, their high bits at 68h-6Eh.
+- XCTRL (6Fh) bit 0, the extended mode: the write pointers count on their 10
+  bits, an edge takes 3 bytes and a face 12, with 10-bit indices. Read, bits
+  7-4: 10 (1024 entries in each RAM).
+- VFIRST (54h), FFIRST (56h), EFIRST (66h): where the transform, face and
+  edge phases of a RUN start.
+- Index 49h reads 20h (v1.0.0: FFh).
+
+A v1.0.0 program sees no difference: every new register resets to 0, and
+`tools/geo3d_replay` gives the v1.0.0 logs for the v1.0.0 test sets as
+before. It also gives the logs of the reference model for the v2.0 scenes
+(`sim/gen_v2_scenes.py`: 77,390 lines, with the registers read back) and for
+the benchmark's frames. A savestate made before v2.0 still loads.
+
+What v2.0 does for speed in the FPGA (the order of the faces from a heap, a
+faster divider) changes nothing here: in this device the geometry takes no
+emulated time.
+
+openMSX built from this branch (Linux) answers as v2.0 in a running
+`C-BIOS_V9968_JP` machine (ID 20h, XCTRL A0h, a 10-bit NVERT and VFIRST
+read back) and `tools/geo3d_smoke.tcl` gives its expected values. Not done:
+no v2.0 program has run in it yet (none exists), and the Windows build has
+not been made from this branch.
+
 ## What is here
 
 | Files | What |

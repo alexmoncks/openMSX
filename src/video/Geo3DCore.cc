@@ -42,8 +42,11 @@ void Geo3DCore::reset()
 	for (auto& p : pmem) p = {0, 0, 0, 0};
 	widx = 0; rptr = 0x30; lo = 0;
 	vaddr = eaddr = nvert = nedge = 0;
+	vfirst = efirst = ffirst = 0;
+	ext = false;
 	color = 15; lop = 0; ypage = 0;
-	faddr = nface = taddr = tstride = 0;
+	faddr = nface = taddr = 0;
+	tstride = 0;
 	texx = 0; texy = 512;
 	light = {0, 0, -16384};
 	vbuf.clear(); ebuf.clear(); fbuf.clear(); tbuf.clear();
@@ -80,11 +83,14 @@ void Geo3DCore::writeData(uint8_t b)
 			}
 		}
 	} else {
+		// a 10-bit register: its low byte, its two high bits
+		auto lo8 = [&](uint16_t& r) { r = uint16_t((r & 0x300) | b); };
+		auto hi2 = [&](uint16_t& r) { r = uint16_t((r & 0xFF) | ((b & 3) << 8)); };
 		switch (i) {
-		case 0x40: vaddr = b; break;
-		case 0x41: eaddr = b; break;
-		case 0x42: nvert = b; break;
-		case 0x43: nedge = b; break;
+		case 0x40: lo8(vaddr); break;
+		case 0x41: lo8(eaddr); break;
+		case 0x42: lo8(nvert); break;
+		case 0x43: lo8(nedge); break;
 		case 0x44: color = b; break;
 		case 0x45: lop = b & 0xF; break;
 		case 0x46: ypage = (ypage & 0x700) | b; break;
@@ -100,28 +106,38 @@ void Geo3DCore::writeData(uint8_t b)
 				for (int k = 0; k < 3; ++k) {
 					vmem[vaddr][k] = signed16(vbuf[2 * k] | (vbuf[2 * k + 1] << 8));
 				}
-				++vaddr;
+				vaddr = bump(vaddr);
 				vbuf.clear();
 			}
 			break;
 		case 0x51:
+			// v1.0.0: A, B. Extended: then a byte with the high bits
+			// (A in bits 1-0, B in bits 3-2).
 			ebuf.push_back(b);
-			if (ebuf.size() == 2) {
-				emem[eaddr] = {ebuf[0], ebuf[1]};
-				++eaddr;
+			if (ebuf.size() == (ext ? 3u : 2u)) {
+				unsigned hi = ext ? ebuf[2] : 0;
+				emem[eaddr] = {uint16_t(ebuf[0] | ((hi & 3) << 8)),
+				               uint16_t(ebuf[1] | (((hi >> 2) & 3) << 8))};
+				eaddr = bump(eaddr);
 				ebuf.clear();
 			}
 			break;
 		case 0x52:
+			// v1.0.0: I0 I1 I2 I3, NX NY NZ, BASE (11 bytes). Extended: a
+			// byte with the two high bits of each index follows I3 (12).
 			fbuf.push_back(b);
-			if (fbuf.size() == 11) {
+			if (fbuf.size() == (ext ? 12u : 11u)) {
 				auto& f = fmem[faddr];
-				for (int k = 0; k < 4; ++k) f.i[k] = fbuf[k];
-				for (int k = 0; k < 3; ++k) {
-					f.n[k] = signed16(fbuf[4 + 2 * k] | (fbuf[5 + 2 * k] << 8));
+				unsigned hi = ext ? fbuf[4] : 0;
+				unsigned o = ext ? 5 : 4;         // where the normal starts
+				for (int k = 0; k < 4; ++k) {
+					f.i[k] = uint16_t(fbuf[k] | (((hi >> (2 * k)) & 3) << 8));
 				}
-				f.base = fbuf[10];
-				++faddr;
+				for (int k = 0; k < 3; ++k) {
+					f.n[k] = signed16(fbuf[o + 2 * k] | (fbuf[o + 1 + 2 * k] << 8));
+				}
+				f.base = fbuf[o + 6];
+				faddr = bump(faddr);
 				fbuf.clear();
 			}
 			break;
@@ -129,12 +145,16 @@ void Geo3DCore::writeData(uint8_t b)
 			tbuf.push_back(b);
 			if (tbuf.size() == 8) {
 				std::copy(tbuf.begin(), tbuf.end(), tmem[taddr].begin());
-				++taddr;
+				taddr = bump(taddr);
 				tbuf.clear();
 			}
 			break;
-		case 0x58: faddr = b; break;
-		case 0x59: nface = b; break;
+		case 0x54: lo8(vfirst); break;
+		case 0x55: hi2(vfirst); break;
+		case 0x56: lo8(ffirst); break;
+		case 0x57: hi2(ffirst); break;
+		case 0x58: lo8(faddr); break;
+		case 0x59: lo8(nface); break;
 		case 0x5A: case 0x5C: case 0x5E: lo = b; break;
 		case 0x5B: case 0x5D: case 0x5F:
 			light[(i - 0x5B) / 2] = signed16((b << 8) | lo);
@@ -144,17 +164,31 @@ void Geo3DCore::writeData(uint8_t b)
 		case 0x62: texy = (texy & 0x1F00) | b; break;
 		case 0x63: texy = (texy & 0xFF) | ((b & 0x1F) << 8); break;
 		case 0x64: tstride = b; break;
-		case 0x65: taddr = b; break;
+		case 0x65: lo8(taddr); break;
+		case 0x66: lo8(efirst); break;
+		case 0x67: hi2(efirst); break;
+		case 0x68: hi2(vaddr); break;
+		case 0x69: hi2(eaddr); break;
+		case 0x6A: hi2(nvert); break;
+		case 0x6B: hi2(nedge); break;
+		case 0x6C: hi2(faddr); break;
+		case 0x6D: hi2(nface); break;
+		case 0x6E: hi2(taddr); break;
+		case 0x6F: ext = (b & 1) != 0; break;
 		default: break;
 		}
 	}
 	// index advance (next_idx in the RTL)
 	if ((i >> 4) == 4) {
 		widx = 0x40 | ((i + 1) & 0xF);
+	} else if ((i >> 2) == 0x15) {
+		widx = 0x54 | ((i + 1) & 0x3);
 	} else if ((i >> 3) == 0x0B) {
 		widx = 0x58 | ((i + 1) & 0x7);
 	} else if ((i >> 3) == 0x0C) {
 		widx = 0x60 | ((i + 1) & 0x7);
+	} else if ((i >> 3) == 0x0D) {
+		widx = 0x68 | ((i + 1) & 0x7);
 	} else if (i == 0x29) {
 		widx = 0x24;
 	} else if (i < 0x40) {
@@ -180,24 +214,39 @@ uint8_t Geo3DCore::readReg(uint8_t idx) const
 	case 0x34: return uint8_t(imm.z);
 	case 0x35: return uint8_t(imm.z >> 8);
 	case 0x36: return uint8_t(imm.flags);
-	case 0x40: return vaddr;
-	case 0x41: return eaddr;
-	case 0x42: return nvert;
-	case 0x43: return nedge;
+	case 0x40: return uint8_t(vaddr);
+	case 0x41: return uint8_t(eaddr);
+	case 0x42: return uint8_t(nvert);
+	case 0x43: return uint8_t(nedge);
 	case 0x44: return color;
 	case 0x45: return lop;
 	case 0x46: return uint8_t(ypage);
 	case 0x47: return uint8_t(ypage >> 8);
 	case 0x48: return readStatus();
+	case 0x49: return ID;
 	case 0x4A: return uint8_t(cntSkip);
 	case 0x4B: return uint8_t(cntSkip >> 8);
 	case 0x4C: return uint8_t(cntDraw);
 	case 0x4D: return uint8_t(cntDraw >> 8);
 	case 0x4E: return uint8_t(cntCull);
 	case 0x4F: return uint8_t(cntCull >> 8);
-	case 0x58: return faddr;
-	case 0x59: return nface;
-	case 0x65: return taddr;
+	case 0x54: return uint8_t(vfirst);
+	case 0x55: return uint8_t(vfirst >> 8);
+	case 0x56: return uint8_t(ffirst);
+	case 0x57: return uint8_t(ffirst >> 8);
+	case 0x58: return uint8_t(faddr);
+	case 0x59: return uint8_t(nface);
+	case 0x65: return uint8_t(taddr);
+	case 0x66: return uint8_t(efirst);
+	case 0x67: return uint8_t(efirst >> 8);
+	case 0x68: return uint8_t(vaddr >> 8);
+	case 0x69: return uint8_t(eaddr >> 8);
+	case 0x6A: return uint8_t(nvert >> 8);
+	case 0x6B: return uint8_t(nedge >> 8);
+	case 0x6C: return uint8_t(faddr >> 8);
+	case 0x6D: return uint8_t(nface >> 8);
+	case 0x6E: return uint8_t(taddr >> 8);
+	case 0x6F: return uint8_t((AW << 4) | (ext ? 1 : 0));
 	default:   return 0xFF;
 	}
 }
@@ -257,7 +306,7 @@ struct Reader {
 
 // One field list for both directions (Writer or Reader).
 template<typename IO, typename U8, typename I64>
-void Geo3DCore::visitState(Geo3DCore& c, IO& io, U8 u8, I64 i64)
+void Geo3DCore::visitState(Geo3DCore& c, IO& io, U8 u8, I64 i64, int layout)
 {
 	for (auto& x : c.cfg) i64(io, x);
 	for (auto& x : c.ivtx) i64(io, x);
@@ -266,19 +315,36 @@ void Geo3DCore::visitState(Geo3DCore& c, IO& io, U8 u8, I64 i64)
 		int64_t f = p.flags; i64(io, f); p.flags = unsigned(f);
 	};
 	proj(c.imm);
-	for (auto& v : c.vmem) for (auto& x : v) i64(io, x);
-	for (auto& e : c.emem) for (auto& x : e) u8(io, x);
-	for (auto& f : c.fmem) {
-		for (auto& x : f.i) u8(io, x);
+	// A layout before STATE_V2 is geo3d v1.0.0's: 256 entries in each RAM,
+	// counts, pointers and indices of 8 bits (what is not in it keeps its
+	// reset value).
+	const bool v2 = layout >= STATE_V2;
+	const size_t entries = v2 ? size_t(NMEM) : 256;
+	auto u16 = [&](uint16_t& x) {
+		if (v2) {
+			int64_t v = x; i64(io, v); x = uint16_t(v & MASK);
+		} else {
+			uint8_t v = uint8_t(x); u8(io, v); x = v;
+		}
+	};
+	for (size_t k = 0; k < entries; ++k) for (auto& x : c.vmem[k]) i64(io, x);
+	for (size_t k = 0; k < entries; ++k) for (auto& x : c.emem[k]) u16(x);
+	for (size_t k = 0; k < entries; ++k) {
+		auto& f = c.fmem[k];
+		for (auto& x : f.i) u16(x);
 		for (auto& x : f.n) i64(io, x);
 		u8(io, f.base);
 	}
-	for (auto& t : c.tmem) for (auto& x : t) u8(io, x);
-	for (auto& p : c.pmem) proj(p);
-	for (uint8_t* p : {&c.widx, &c.rptr, &c.lo, &c.vaddr, &c.eaddr, &c.nvert,
-	                   &c.nedge, &c.color, &c.lop, &c.faddr, &c.nface, &c.taddr,
-	                   &c.tstride}) {
-		u8(io, *p);
+	for (size_t k = 0; k < entries; ++k) for (auto& x : c.tmem[k]) u8(io, x);
+	for (size_t k = 0; k < entries; ++k) proj(c.pmem[k]);
+	u8(io, c.widx); u8(io, c.rptr); u8(io, c.lo);
+	u16(c.vaddr); u16(c.eaddr); u16(c.nvert); u16(c.nedge);
+	u8(io, c.color); u8(io, c.lop);
+	u16(c.faddr); u16(c.nface); u16(c.taddr);
+	u8(io, c.tstride);
+	if (v2) {
+		u16(c.vfirst); u16(c.efirst); u16(c.ffirst);
+		uint8_t e = c.ext; u8(io, e); c.ext = e != 0;
 	}
 	for (unsigned* p : {&c.ypage, &c.texx, &c.texy}) {
 		int64_t v = *p; i64(io, v); *p = unsigned(v);
@@ -314,18 +380,25 @@ std::vector<uint8_t> Geo3DCore::saveState() const
 	auto& self = const_cast<Geo3DCore&>(*this);   // visitState only reads when writing
 	visitState(self, w,
 	           [](Writer& o, uint8_t& x) { o.u8(x); },
-	           [](Writer& o, int64_t& x) { o.i64(x); });
+	           [](Writer& o, int64_t& x) { o.i64(x); }, STATE_LAYOUT);
 	return out;
 }
 
 void Geo3DCore::loadState(const std::vector<uint8_t>& data)
 {
-	Geo3DCore tmp;
-	Reader r{data};
-	visitState(tmp, r,
-	           [](Reader& i, uint8_t& x) { x = i.u8(); },
-	           [](Reader& i, int64_t& x) { x = i.i64(); });
-	if (r.ok && r.pos == data.size()) *this = tmp;
+	// the current layout, or else geo3d v1.0.0's (a savestate made before
+	// v2.0): the one that takes exactly these bytes
+	for (int layout = STATE_LAYOUT; layout >= 1; --layout) {
+		Geo3DCore tmp;
+		Reader r{data};
+		visitState(tmp, r,
+		           [](Reader& i, uint8_t& x) { x = i.u8(); },
+		           [](Reader& i, int64_t& x) { x = i.i64(); }, layout);
+		if (r.ok && r.pos == data.size()) {
+			*this = tmp;
+			return;
+		}
+	}
 }
 
 // ---------------------------------------------------------------- transform
@@ -368,14 +441,17 @@ Geo3DCore::Proj Geo3DCore::project(const std::array<int64_t, 18>& c,
 void Geo3DCore::startRun(uint8_t ctrl)
 {
 	cntSkip = cntDraw = cntCull = 0;
-	for (unsigned vi = 0; vi < nvert; ++vi) {
+	// NVERT vertices from VFIRST on (around the end of the RAM)
+	for (unsigned k = 0; k < nvert; ++k) {
+		unsigned vi = (vfirst + k) & MASK;
 		pmem[vi] = project(cfg, vmem[vi]);
 	}
 	if (nvert != 0) {
 		// the engine streams the vertices through the same core, so the
 		// immediate registers end up holding the last one
-		ivtx = vmem[nvert - 1];
-		imm = pmem[nvert - 1];
+		unsigned last = (vfirst + nvert - 1) & MASK;
+		ivtx = vmem[last];
+		imm = pmem[last];
 	}
 	cmds.clear();
 	cmdPos = 0;
@@ -448,7 +524,8 @@ Clip clipEdge(Pt A, Pt B, int64_t w, int64_t h, Pt& e1, Pt& e2)
 void Geo3DCore::renderEdges()
 {
 	int64_t w = cfg[16], h = cfg[17];
-	for (unsigned e = 0; e < nedge; ++e) {
+	for (unsigned k = 0; k < nedge; ++k) {
+		unsigned e = (efirst + k) & MASK;     // NEDGE edges from EFIRST on
 		const Proj& pa = pmem[emem[e][0]];
 		const Proj& pb = pmem[emem[e][1]];
 		if ((pa.flags & 7) || (pb.flags & 7)) {
@@ -495,7 +572,8 @@ void Geo3DCore::renderFaces(bool texOn)
 
 	struct Vis { int64_t key; unsigned fidx; uint8_t col; int64_t lvl; };
 	std::vector<Vis> vis;
-	for (unsigned fidx = 0; fidx < nface; ++fidx) {
+	for (unsigned k = 0; k < nface; ++k) {
+		unsigned fidx = (ffirst + k) & MASK;  // NFACE faces from FFIRST on
 		const Face& f = fmem[fidx];
 		const Proj* pv[4];
 		bool near = false;
@@ -514,9 +592,11 @@ void Geo3DCore::renderFaces(bool texOn)
 		int64_t key = pv[0]->z + pv[1]->z + pv[2]->z + pv[3]->z;
 		vis.push_back({key, fidx, uint8_t((f.base + lvl) & 0xFF), lvl});
 	}
-	// painter's order: farthest first, ties by lower face index
-	std::stable_sort(vis.begin(), vis.end(),
-	                 [](const Vis& a, const Vis& b) { return a.key > b.key; });
+	// painter's order: farthest first, ties by lower face number (the
+	// faces may start anywhere since v2.0: FFIRST)
+	std::sort(vis.begin(), vis.end(), [](const Vis& a, const Vis& b) {
+		return (a.key != b.key) ? (a.key > b.key) : (a.fidx < b.fidx);
+	});
 	cntDraw = uint16_t(vis.size());
 
 	struct Cand { int64_t x, u, v; };

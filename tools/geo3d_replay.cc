@@ -9,8 +9,9 @@
 //   stimulus: W <sel> <byte hex>   port write (sel 0 = index, 1 = data)
 //             R                    wait for RUN busy to clear
 //             K                    read SKIPPED/DRAWN/CULLED (index 0x4A)
+//             G <idx hex> <n>      read n registers from index idx
 //             F <n>                frame marker
-//   log:      L <11 bytes> / M <19 bytes> per VDP command, K ..., F n
+//   log:      L <11 bytes> / M <19 bytes> per VDP command, K ..., G ..., F n
 //
 // Build: g++ -std=c++23 -O2 -Isrc/video tools/geo3d_replay.cc src/video/Geo3DCore.cc
 
@@ -64,6 +65,14 @@ int main(int argc, char** argv)
 			uint8_t k[6];
 			for (auto& x : k) x = g.readData();
 			std::fprintf(out, "K %02x%02x %02x%02x %02x%02x\n", k[1], k[0], k[3], k[2], k[5], k[4]);
+		} else if (op == "G") {
+			// G <index, hex> <count>: read registers (geo3d v2.0's tests)
+			unsigned idx, n;
+			is >> std::hex >> idx >> std::dec >> n;
+			g.writeIndex(uint8_t(idx));
+			std::fprintf(out, "G %02x", idx);
+			for (unsigned k = 0; k < n; ++k) std::fprintf(out, " %02x", g.readData());
+			std::fputc('\n', out);
 		} else if (op == "F") {
 			unsigned n;
 			is >> n;
