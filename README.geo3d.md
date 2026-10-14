@@ -40,9 +40,11 @@ emulated time.
 
 openMSX built from this branch (Linux) answers as v2.0 in a running
 `C-BIOS_V9968_JP` machine (ID 20h, XCTRL A0h, a 10-bit NVERT and VFIRST
-read back) and `tools/geo3d_smoke.tcl` gives its expected values. Not done:
-no v2.0 program has run in it yet (none exists), and the Windows build has
-not been made from this branch.
+read back) and `tools/geo3d_smoke.tcl` gives its expected values. The
+Windows build (`make staticbindist OPENMSX_TARGET_OS=mingw-w64
+OPENMSX_TARGET_CPU=x86_64`) answers the same way, and GEO FIGHTER, a
+geo3d v1.0.0 program with a resident scene, passes its own test scenarios
+on it. No v2.0 program has run in it yet (none exists).
 
 ## What is here
 
